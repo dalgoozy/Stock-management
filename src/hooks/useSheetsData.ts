@@ -41,15 +41,40 @@ export function useSheetsData() {
   };
 
   const parseRows = (table: any) => {
-    if (!table || !table.rows) return [];
-    const cols = table.cols.map((c: any) => (c.label || '').trim());
-    return table.rows.map((row: any) => {
+    if (!table || !table.rows || table.rows.length === 0) return [];
+    
+    // Get column labels from metadata, or fallback to first row's values if empty
+    let cols = table.cols.map((c: any) => (c.label || '').trim());
+    const firstRowCells = table.rows[0].c;
+    
+    // If more than half of column labels are empty, assume the first row contains the headers
+    const emptyLabels = cols.filter(l => !l).length;
+    let dataStartIdx = 0;
+    
+    if (emptyLabels > cols.length / 2) {
+      cols = firstRowCells.map((cell: any) => (cell ? String(cell.v).trim() : ''));
+      dataStartIdx = 1; // Skip the first row as it's now our header
+    }
+
+    return table.rows.slice(dataStartIdx).map((row: any) => {
       const obj: any = {};
+      if (!row || !row.c) return obj;
+      
       row.c.forEach((cell: any, i: number) => {
-        if (!cols[i] || !cell) { if (cols[i]) obj[cols[i]] = null; return; }
-        let val = cell.v;
-        if (val instanceof Date) {
-          val = `${val.getFullYear()}-${String(val.getMonth()+1).padStart(2,'0')}-${String(val.getDate()).padStart(2,'0')} ${String(val.getHours()).padStart(2,'0')}:${String(val.getMinutes()).padStart(2,'0')}`;
+        if (!cols[i]) return;
+        
+        let val = cell ? cell.v : null;
+        if (val === null) {
+          obj[cols[i]] = null;
+        } else if (typeof val === 'string' && val.startsWith('Date(')) {
+          // Handle Date(2024,3,22) format
+          const match = val.match(/\d+/g);
+          if (match) {
+            const [y, m, d] = match;
+            val = `${y}-${String(Number(m)+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+          }
+        } else if (val instanceof Date) {
+          val = `${val.getFullYear()}-${String(val.getMonth()+1).padStart(2,'0')}-${String(val.getDate()).padStart(2,'0')}`;
         }
         obj[cols[i]] = val;
       });
