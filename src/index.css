@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+:root {
+  --bg-base: #070d1f;
+  --bg-surface: #0d1530;
+  --bg-card: rgba(255, 255, 255, 0.04);
+  --bg-card-hover: rgba(255, 255, 255, 0.07);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-bright: rgba(255, 255, 255, 0.15);
+
+  --text-primary: #e8edf5;
+  --text-secondary: #8899bb;
+  --text-muted: #4a5878;
+
+  --positive: #10b981;
+  --positive-bg: rgba(16, 185, 129, 0.12);
+  --negative: #ef4444;
+  --negative-bg: rgba(239, 68, 68, 0.12);
+  --neutral: #94a3b8;
+
+  --accent-blue: #3b82f6;
+  --accent-purple: #8b5cf6;
+  --accent-amber: #f59e0b;
+  --accent-cyan: #06b6d4;
+  --accent-emerald: #10b981;
+
+  --sector-defense: #f59e0b;
+  --sector-semi: #3b82f6;
+  --sector-ship: #06b6d4;
+  --sector-robot: #8b5cf6;
+  --sector-power: #10b981;
+
+  --header-h: 68px;
+  --radius: 14px;
+  --radius-sm: 8px;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --glow-blue: 0 0 20px rgba(59, 130, 246, 0.25);
+}
+
+body {
+  font-family: 'Outfit', 'Noto Sans KR', sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  min-height: 100vh;
+  margin: 0;
+}
+
+/* Legacy utility classes for quick migration */
+.positive { color: var(--positive); }
+.negative { color: var(--negative); }
+.neutral { color: var(--neutral); }
+
+.sheets-status {
+  font-size: 11px; font-weight: 700;
+  padding: 5px 11px; border-radius: 20px;
+  white-space: nowrap;
+}
+.sheets-status.connected {
+  background: rgba(16,185,129,0.15);
+  border: 1px solid rgba(16,185,129,0.3);
+  color: #10b981;
+}
+.sheets-status.disconnected {
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.2);
+  color: #ef4444;
+}
+
+.sector-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge-defense { background: rgba(245,158,11,0.15); color: var(--sector-defense); }
+.badge-semi { background: rgba(59,130,246,0.15); color: var(--sector-semi); }
+.badge-ship { background: rgba(6,182,212,0.15); color: var(--sector-ship); }
+.badge-robot { background: rgba(139,92,246,0.15); color: var(--sector-robot); }
+.badge-power { background: rgba(16,185,129,0.15); color: var(--sector-power); }
+.badge-bio { background: rgba(236,72,153,0.15); color: #ec4899; }
+
+.rate-pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: 12px;
+}
+.rate-pos { background: var(--positive-bg); color: var(--positive); }
+.rate-neg { background: var(--negative-bg); color: var(--negative); }
