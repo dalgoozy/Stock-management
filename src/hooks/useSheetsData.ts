@@ -58,11 +58,23 @@ export function useSheetsData() {
   };
 
   const getVal = (row: any, keys: string[]) => {
+    if (!row) return null;
     const rowKeys = Object.keys(row);
+    
+    // 1st pass: exact or case-insensitive match (ignoring spaces)
     for (let k of keys) {
-      const found = rowKeys.find(rk => rk.toLowerCase().replace(/\s/g,'') === k.toLowerCase().replace(/\s/g,''));
+      const target = k.toLowerCase().replace(/[\s_]/g, '');
+      const found = rowKeys.find(rk => rk.toLowerCase().replace(/[\s_]/g, '') === target);
       if (found) return row[found];
     }
+    
+    // 2nd pass: fuzzy match (contains)
+    for (let k of keys) {
+      const target = k.toLowerCase().replace(/[\s_]/g, '');
+      const found = rowKeys.find(rk => rk.toLowerCase().replace(/[\s_]/g, '').includes(target));
+      if (found) return row[found];
+    }
+    
     return null;
   };
 
@@ -79,42 +91,60 @@ export function useSheetsData() {
         const prRows = parseRows(prTable);
         const aRows = parseRows(aTable);
 
+        // Price Map
         const priceMap: any = {};
         prRows.forEach((r: any) => {
-          const name = getVal(r, ['종목명', '종목']);
-          const price = getVal(r, ['현재가', 'Price']);
-          if (name && price) priceMap[name] = Number(price);
+          const name = getVal(r, ['종목명', '종목', '항목', 'Name']);
+          const price = getVal(r, ['현재가', 'Price', 'Value', '시세']);
+          if (name) {
+            const cleanName = String(name).trim();
+            priceMap[cleanName] = typeof price === 'number' ? price : Number(String(price || '0').replace(/,/g, ''));
+          }
         });
 
+        // Market Indices
+        const marketIndices: any = {};
+        const findPrice = (names: string[]) => {
+            for (const name of names) {
+                const target = name.toUpperCase().replace(/\s/g,'');
+                const key = Object.keys(priceMap).find(k => k.toUpperCase().replace(/\s/g,'') === target);
+                if (key) return priceMap[key];
+            }
+            return 0;
+        };
+        
+        marketIndices['KOSPI'] = findPrice(['KOSPI', '코스피']);
+        marketIndices['KOSDAQ'] = findPrice(['KOSDAQ', '코스닥']);
+        marketIndices['S&P 500'] = findPrice(['S&P 500', 'S&P500', 'SNP500']);
+        marketIndices['NASDAQ'] = findPrice(['NASDAQ', '나스닥']);
+        marketIndices['USD/KRW'] = findPrice(['USD/KRW', '원달러', '환율']);
+        marketIndices['닛케이 225'] = findPrice(['닛케이 225', 'NIKKEI', '닛케이']);
+
+        // Portfolio
         const portfolio = pRows
           .map((r: any) => {
             const name = getVal(r, ['종목명', '종목', 'Name']);
             if (!name) return null;
+            
+            const qty = Number(String(getVal(r, ['수량', 'Quantity', 'Amount']) || '0').replace(/,/g, '')) || 0;
+            const avg = Number(String(getVal(r, ['평단가', 'AvgPrice', 'Average']) || '0').replace(/,/g, '')) || 0;
+            const cur = priceMap[name] || 0;
+            
             return {
-              name,
-              sector: getVal(r, ['섹터', 'Sector', '분류']),
-              qty: Number(getVal(r, ['수량', 'Quantity', 'Amount'])) || 0,
-              avg: Number(getVal(r, ['평단가', 'AvgPrice', 'Average'])) || 0,
-              cur: priceMap[name] || 0,
-              target: Number(getVal(r, ['목표가', 'Target'])) || 0
+              name: String(name),
+              sector: String(getVal(r, ['섹터', 'Sector', '분류', '분야']) || '기타'),
+              qty,
+              avg,
+              cur,
+              target: Number(String(getVal(r, ['목표가', 'Target']) || '0').replace(/,/g, '')) || 0
             };
           })
           .filter((h: any) => h !== null && h.qty > 0);
 
-        const marketIndices: any = {};
-        const findPrice = (name: string) => {
-            const key = Object.keys(priceMap).find(k => k.toUpperCase().replace(/\s/g,'') === name.toUpperCase().replace(/\s/g,''));
-            return key ? priceMap[key] : 0;
-        };
-        
-        ['KOSPI', 'KOSDAQ', 'S&P500', 'NASDAQ', 'USD/KRW'].forEach(name => {
-            marketIndices[name] = findPrice(name);
-        });
-
-        // Extract latest analysis time
-        let latestAnalysisTime = '';
+        // Analysis Summary
+        let latestAnalysisTime = '데이터 없음';
         if (aRows.length > 0) {
-            const times = aRows.map((r: any) => getVal(r, ['ai_analysis 날짜', '날짜'])).filter(Boolean);
+            const times = aRows.map((r: any) => getVal(r, ['날짜', 'Date', 'Time', 'ai_analysis 날짜'])).filter(Boolean);
             if (times.length > 0) {
                 latestAnalysisTime = String(times.sort().reverse()[0]);
             }
@@ -123,17 +153,24 @@ export function useSheetsData() {
         setData({
           portfolio,
           marketIndices,
-          predictions: aRows,
+          predictions: aRows.map(r => ({
+            ...r,
+            '섹터': getVal(r, ['섹터', 'Sector']),
+            '점수': Number(getVal(r, ['점수', 'Score', 'Rating'])) || 75,
+            '신호': getVal(r, ['신호', 'Signal', 'Action']) || '관망',
+            'ai_analysis': getVal(r, ['ai_analysis', '분석', 'Analysis']) || '분석 데이터 로드 중...'
+          })),
           latestAnalysisTime,
           loading: false,
           error: null
         });
       } catch (err) {
+        console.error('Load Error:', err);
         setData((prev: any) => ({ ...prev, loading: false, error: err }));
       }
     }
     loadAll();
-    const interval = setInterval(loadAll, 60000); // 1 minute sync
+    const interval = setInterval(loadAll, 60000);
     return () => clearInterval(interval);
   }, []);
 
