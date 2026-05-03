@@ -105,7 +105,7 @@ const App: React.FC = () => {
               <KpiCard label="총 평가자산" value={`₩ ${totalEval.toLocaleString()}`} sub={`투자원금 ₩ ${totalInv.toLocaleString()}`} />
               <KpiCard label="수익률" value={`${totalPnl >= 0 ? '+' : ''}${totalRate}%`} sub={`${totalPnl >= 0 ? '+' : ''}₩ ${totalPnl.toLocaleString()}`} isPositive={totalPnl >= 0} />
               <KpiCard label="보유 종목수" value={`${portfolio.length}개`} sub="섹터별 분산 투자 중" />
-              <KpiCard label="AI 예측 신호" value="강력매수" sub="방산/전력 섹터 유망" highlight />
+              <KpiCard label="AI 예측 신호" value={predictions.length > 0 ? (predictions.sort((a:any,b:any) => (b['점수']||0)-(a['점수']||0))[0]['신호'] || '관망') : '관망'} sub={predictions.length > 0 ? `${predictions.sort((a:any,b:any)=>(b['점수']||0)-(a['점수']||0))[0]['섹터']} 섹터 유망` : '분석 중'} highlight />
             </div>
 
             {/* Holdings Table */}
@@ -222,6 +222,30 @@ const App: React.FC = () => {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'market' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <h2 className="text-xl font-bold">글로벌 시장 현황</h2>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+              {Object.entries(marketIndices).map(([name, val]: [string, any]) => (
+                <div key={name} className="bg-white/5 border border-white/10 rounded-2xl p-5 hover:border-white/20 transition-all">
+                  <div className="text-[11px] text-[#8899bb] font-bold uppercase tracking-wider mb-2">{name}</div>
+                  <div className="text-2xl font-black font-mono text-white">
+                    {name === 'USD/KRW' ? `₩${(val||0).toLocaleString()}` : (val||0).toLocaleString()}
+                  </div>
+                  <div className="text-[11px] text-[#4a5878] mt-1">{val > 0 ? '실시간 데이터' : '데이터 없음'}</div>
+                </div>
+              ))}
+            </div>
+            {Object.values(marketIndices).every((v:any) => !v || v === 0) && (
+              <div className="text-center py-16 text-[#4a5878]">
+                <Globe className="w-12 h-12 mx-auto mb-4 opacity-30" />
+                <p className="text-sm">시장 지수 데이터를 불러오는 중입니다.</p>
+                <p className="text-xs mt-2">Python 스크립트(ai_analysis.py)를 실행하면 자동으로 채워집니다.</p>
+              </div>
+            )}
           </div>
         )}
       </main>
