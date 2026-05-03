@@ -1,107 +1,95 @@
 import { useState, useEffect } from 'react';
 
-const SHEETS_CONFIG = {
-  SHEET_ID: '1Ohg32uNneSFBQajG0Eqqe-Bdvkwpkw-FkvWS9cH-a8o',
+const SHEET_ID = '1Ohg32uNneSFBQajG0Eqqe-Bdvkwpkw-FkvWS9cH-a8o';
+
+// Fetch a sheet tab via JSONP and return raw table object
+const fetchSheet = (sheetName: string): Promise<any> => {
+  return new Promise((resolve) => {
+    const cbName = 'cb_' + Math.random().toString(36).substring(2, 9);
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=responseHandler:${cbName}&sheet=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
+    
+    (window as any)[cbName] = (response: any) => {
+      delete (window as any)[cbName];
+      resolve(response?.table || null);
+    };
+
+    const script = document.createElement('script');
+    script.src = url;
+    script.onerror = () => { resolve(null); script.remove(); };
+    script.onload = () => script.remove();
+    setTimeout(() => { resolve(null); }, 10000); // 10s timeout
+    document.head.appendChild(script);
+  });
+};
+
+// Parse table into array of row objects using column labels
+const parseRows = (table: any): any[] => {
+  if (!table?.rows?.length || !table?.cols) return [];
+  const cols = table.cols.map((c: any) => (c.label || '').trim());
+  
+  return table.rows.map((row: any) => {
+    const obj: any = {};
+    if (!row?.c) return obj;
+    row.c.forEach((cell: any, i: number) => {
+      if (!cols[i]) return;
+      let val = cell?.v ?? null;
+      // Google Sheets sometimes returns dates as Date objects or "Date(y,m,d)" strings
+      if (val instanceof Date) {
+        val = `${val.getFullYear()}-${String(val.getMonth()+1).padStart(2,'0')}-${String(val.getDate()).padStart(2,'0')}`;
+      } else if (typeof val === 'string' && val.match(/^Date\(/)) {
+        const parts = val.match(/\d+/g);
+        if (parts) val = `${parts[0]}-${String(Number(parts[1])+1).padStart(2,'0')}-${String(parts[2]).padStart(2,'0')}`;
+      }
+      obj[cols[i]] = val;
+    });
+    return obj;
+  }).filter((r: any) => Object.values(r).some(v => v !== null && v !== ''));
+};
+
+// Parse table using column POSITION (0-based) instead of label name
+// This handles cases where column labels are empty or wrong
+const parseByPosition = (table: any): any[][] => {
+  if (!table?.rows?.length) return [];
+  return table.rows.map((row: any) =>
+    (row?.c || []).map((cell: any) => {
+      let val = cell?.v ?? null;
+      if (val instanceof Date) {
+        val = `${val.getFullYear()}-${String(val.getMonth()+1).padStart(2,'0')}-${String(val.getDate()).padStart(2,'0')}`;
+      } else if (typeof val === 'string' && val.match(/^Date\(/)) {
+        const parts = val.match(/\d+/g);
+        if (parts) val = `${parts[0]}-${String(Number(parts[1])+1).padStart(2,'0')}-${String(parts[2]).padStart(2,'0')}`;
+      }
+      return val;
+    })
+  );
+};
+
+// Fuzzy name match for price lookup (handles typos like SK하아닉스 vs SK하이닉스)
+const fuzzyMatch = (a: string, b: string): boolean => {
+  const clean = (s: string) => s.toLowerCase().replace(/\s/g, '');
+  const ca = clean(String(a));
+  const cb = clean(String(b));
+  if (ca === cb) return true;
+  // Allow 1 character difference (simple edit distance)
+  if (Math.abs(ca.length - cb.length) > 2) return false;
+  let diffs = 0;
+  const shorter = ca.length <= cb.length ? ca : cb;
+  const longer = ca.length <= cb.length ? cb : ca;
+  for (let i = 0; i < shorter.length; i++) {
+    if (shorter[i] !== longer[i]) diffs++;
+  }
+  return (diffs + (longer.length - shorter.length)) <= 2;
 };
 
 export function useSheetsData() {
   const [data, setData] = useState<any>({
     portfolio: [],
     marketIndices: {},
-    news: [],
     predictions: [],
+    latestAnalysisTime: '로딩 중...',
     loading: true,
     error: null
   });
-
-  const fetchSheet = async (sheetName: string) => {
-    return new Promise((resolve) => {
-      const requestId = 'req_' + Math.random().toString(36).substring(2, 11);
-      (window as any).google = (window as any).google || {};
-      (window as any).google.visualization = (window as any).google.visualization || {};
-      (window as any).google.visualization.Query = (window as any).google.visualization.Query || {};
-      
-      const originalHandler = (window as any).google.visualization.Query.setResponse;
-      (window as any).google.visualization.Query.setResponse = (response: any) => {
-        resolve(response.table);
-        (window as any).google.visualization.Query.setResponse = originalHandler;
-      };
-
-      const url = `https://docs.google.com/spreadsheets/d/${SHEETS_CONFIG.SHEET_ID}/gviz/tq?tqx=responseHandler:google.visualization.Query.setResponse&sheet=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
-      const script = document.createElement('script');
-      script.src = url;
-      script.id = requestId;
-      script.onerror = () => {
-        resolve(null);
-        script.remove();
-      };
-      script.onload = () => script.remove();
-      document.head.appendChild(script);
-    });
-  };
-
-  const parseRows = (table: any) => {
-    if (!table || !table.rows || table.rows.length === 0) return [];
-    
-    // Get column labels from metadata, or fallback to first row's values if empty
-    let cols = table.cols.map((c: any) => (c.label || '').trim());
-    const firstRowCells = table.rows[0].c;
-    
-    // If more than half of column labels are empty, assume the first row contains the headers
-    const emptyLabels = cols.filter(l => !l).length;
-    let dataStartIdx = 0;
-    
-    if (emptyLabels > cols.length / 2) {
-      cols = firstRowCells.map((cell: any) => (cell ? String(cell.v).trim() : ''));
-      dataStartIdx = 1; // Skip the first row as it's now our header
-    }
-
-    return table.rows.slice(dataStartIdx).map((row: any) => {
-      const obj: any = {};
-      if (!row || !row.c) return obj;
-      
-      row.c.forEach((cell: any, i: number) => {
-        if (!cols[i]) return;
-        
-        let val = cell ? cell.v : null;
-        if (val === null) {
-          obj[cols[i]] = null;
-        } else if (typeof val === 'string' && val.startsWith('Date(')) {
-          // Handle Date(2024,3,22) format
-          const match = val.match(/\d+/g);
-          if (match) {
-            const [y, m, d] = match;
-            val = `${y}-${String(Number(m)+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-          }
-        } else if (val instanceof Date) {
-          val = `${val.getFullYear()}-${String(val.getMonth()+1).padStart(2,'0')}-${String(val.getDate()).padStart(2,'0')}`;
-        }
-        obj[cols[i]] = val;
-      });
-      return obj;
-    }).filter((row: any) => Object.values(row).some(v => v !== null));
-  };
-
-  const getVal = (row: any, keys: string[]) => {
-    if (!row) return null;
-    const rowKeys = Object.keys(row);
-    
-    // 1st pass: exact or case-insensitive match (ignoring spaces)
-    for (let k of keys) {
-      const target = k.toLowerCase().replace(/[\s_]/g, '');
-      const found = rowKeys.find(rk => rk.toLowerCase().replace(/[\s_]/g, '') === target);
-      if (found) return row[found];
-    }
-    
-    // 2nd pass: fuzzy match (contains)
-    for (let k of keys) {
-      const target = k.toLowerCase().replace(/[\s_]/g, '');
-      const found = rowKeys.find(rk => rk.toLowerCase().replace(/[\s_]/g, '').includes(target));
-      if (found) return row[found];
-    }
-    
-    return null;
-  };
 
   useEffect(() => {
     async function loadAll() {
@@ -112,88 +100,117 @@ export function useSheetsData() {
           fetchSheet('AI예측')
         ]);
 
-        const pRows = parseRows(pTable);
+        // ── 시세 탭 처리 ──────────────────────────────────
+        // 실제 구조: 1행=헤더(종목명|현재가|변동률), 2행~=데이터
         const prRows = parseRows(prTable);
-        const aRows = parseRows(aTable);
-
-        // Price Map
-        const priceMap: any = {};
+        const priceMap: Record<string, number> = {};
         prRows.forEach((r: any) => {
-          const name = getVal(r, ['종목명', '종목', '항목', 'Name']);
-          const price = getVal(r, ['현재가', 'Price', 'Value', '시세']);
-          if (name) {
-            const cleanName = String(name).trim();
-            priceMap[cleanName] = typeof price === 'number' ? price : Number(String(price || '0').replace(/,/g, ''));
+          const name = r['종목명'] ?? r['종목'] ?? null;
+          const rawPrice = r['현재가'] ?? r['Price'] ?? null;
+          if (name && rawPrice !== null) {
+            priceMap[String(name).trim()] = typeof rawPrice === 'number'
+              ? rawPrice
+              : Number(String(rawPrice).replace(/,/g, '')) || 0;
           }
         });
 
-        // Market Indices
-        const marketIndices: any = {};
-        const findPrice = (names: string[]) => {
-            for (const name of names) {
-                const target = name.toUpperCase().replace(/\s/g,'');
-                const key = Object.keys(priceMap).find(k => k.toUpperCase().replace(/\s/g,'') === target);
-                if (key) return priceMap[key];
-            }
-            return 0;
+        // 종목 현재가 조회 (오타 허용)
+        const getPrice = (stockName: string): number => {
+          const exact = priceMap[stockName];
+          if (exact !== undefined) return exact;
+          const key = Object.keys(priceMap).find(k => fuzzyMatch(k, stockName));
+          return key ? priceMap[key] : 0;
         };
-        
-        marketIndices['KOSPI'] = findPrice(['KOSPI', '코스피']);
-        marketIndices['KOSDAQ'] = findPrice(['KOSDAQ', '코스닥']);
-        marketIndices['S&P 500'] = findPrice(['S&P 500', 'S&P500', 'SNP500']);
-        marketIndices['NASDAQ'] = findPrice(['NASDAQ', '나스닥']);
-        marketIndices['USD/KRW'] = findPrice(['USD/KRW', '원달러', '환율']);
-        marketIndices['닛케이 225'] = findPrice(['닛케이 225', 'NIKKEI', '닛케이']);
 
-        // Portfolio
+        // 시장 지수: 시세 탭에 없으면 0 (파이썬이 나중에 채워줌)
+        const indexNames: Record<string, string[]> = {
+          'KOSPI':    ['KOSPI', '코스피', 'KOSPI 지수'],
+          'KOSDAQ':   ['KOSDAQ', '코스닥', 'KOSDAQ 지수'],
+          'S&P 500':  ['S&P 500', 'S&P500', 'SNP500'],
+          'NASDAQ':   ['NASDAQ', '나스닥'],
+          'USD/KRW':  ['USD/KRW', '원달러', '환율', 'USDKRW'],
+        };
+        const marketIndices: Record<string, number> = {};
+        Object.entries(indexNames).forEach(([label, aliases]) => {
+          const key = Object.keys(priceMap).find(k =>
+            aliases.some(a => fuzzyMatch(k, a))
+          );
+          marketIndices[label] = key ? priceMap[key] : 0;
+        });
+
+        // ── 포트폴리오 탭 처리 ────────────────────────────
+        // 실제 구조: 1행=헤더(종목명|섹터|수량|평단가|목표가|손절가)
+        const pRows = parseRows(pTable);
         const portfolio = pRows
           .map((r: any) => {
-            const name = getVal(r, ['종목명', '종목', 'Name']);
+            const name = String(r['종목명'] ?? r['종목'] ?? '').trim();
             if (!name) return null;
-            
-            const qty = Number(String(getVal(r, ['수량', 'Quantity', 'Amount']) || '0').replace(/,/g, '')) || 0;
-            const avg = Number(String(getVal(r, ['평단가', 'AvgPrice', 'Average']) || '0').replace(/,/g, '')) || 0;
-            const cur = priceMap[name] || 0;
-            
+            const qty = Number(String(r['수량'] ?? '0').replace(/,/g, '')) || 0;
+            const avg = Number(String(r['평단가'] ?? '0').replace(/,/g, '')) || 0;
+            if (qty === 0) return null;
             return {
-              name: String(name),
-              sector: String(getVal(r, ['섹터', 'Sector', '분류', '분야']) || '기타'),
+              name,
+              sector: String(r['섹터'] ?? r['분류'] ?? '기타'),
               qty,
               avg,
-              cur,
-              target: Number(String(getVal(r, ['목표가', 'Target']) || '0').replace(/,/g, '')) || 0
+              cur: getPrice(name),
+              target: Number(String(r['목표가'] ?? '0').replace(/,/g, '')) || 0,
             };
           })
-          .filter((h: any) => h !== null && h.qty > 0);
+          .filter(Boolean);
 
-        // Analysis Summary
-        let latestAnalysisTime = '데이터 없음';
-        if (aRows.length > 0) {
-            const times = aRows.map((r: any) => getVal(r, ['날짜', 'Date', 'Time', 'ai_analysis 날짜'])).filter(Boolean);
-            if (times.length > 0) {
-                latestAnalysisTime = String(times.sort().reverse()[0]);
-            }
+        // ── AI예측 탭 처리 ────────────────────────────────
+        // 실제 구조(컬럼 위치 기준):
+        //   0=날짜, 1=섹터, 2=점수, 3=신호, 4=ai_analysis
+        // 주의: 컬럼 레이블로 읽으면 데이터가 밀려 있으므로 위치 기반으로 파싱
+        const aRaw = parseByPosition(aTable);
+        
+        // 첫 행이 헤더인지 확인 (첫 셀이 "날짜" 또는 숫자가 아닌 문자열이면 헤더)
+        let aDataRows = aRaw;
+        if (aRaw.length > 0 && typeof aRaw[0][0] === 'string' && !aRaw[0][0].match(/^\d/)) {
+          aDataRows = aRaw.slice(1); // 헤더 행 건너뜀
         }
+
+        // 섹터별 최신 데이터만 추출 (같은 섹터면 가장 최근 것)
+        const sectorMap: Record<string, any> = {};
+        aDataRows.forEach((row: any[]) => {
+          const sector = String(row[1] ?? '').trim();
+          if (!sector) return;
+          const score = Number(row[2]) || 75;
+          const signal = String(row[3] ?? '관망').trim();
+          const analysis = String(row[4] ?? '').trim();
+          const date = String(row[0] ?? '').trim();
+          // 나중에 나오는 행이 최신이므로 덮어쓰기
+          sectorMap[sector] = {
+            '섹터': sector,
+            '점수': score,
+            '신호': signal,
+            'ai_analysis': analysis || `${sector} 섹터 분석 완료`,
+            '날짜': date,
+          };
+        });
+
+        const predictions = Object.values(sectorMap);
+
+        // 가장 최근 분석 시각
+        const latestAnalysisTime = aDataRows.length > 0
+          ? String(aDataRows[aDataRows.length - 1][0] ?? '데이터 없음')
+          : '데이터 없음';
 
         setData({
           portfolio,
           marketIndices,
-          predictions: aRows.map(r => ({
-            ...r,
-            '섹터': getVal(r, ['섹터', 'Sector']),
-            '점수': Number(getVal(r, ['점수', 'Score', 'Rating'])) || 75,
-            '신호': getVal(r, ['신호', 'Signal', 'Action']) || '관망',
-            'ai_analysis': getVal(r, ['ai_analysis', '분석', 'Analysis']) || '분석 데이터 로드 중...'
-          })),
+          predictions,
           latestAnalysisTime,
           loading: false,
-          error: null
+          error: null,
         });
       } catch (err) {
-        console.error('Load Error:', err);
-        setData((prev: any) => ({ ...prev, loading: false, error: err }));
+        console.error('[useSheetsData] Error:', err);
+        setData((prev: any) => ({ ...prev, loading: false, error: String(err) }));
       }
     }
+
     loadAll();
     const interval = setInterval(loadAll, 60000);
     return () => clearInterval(interval);
